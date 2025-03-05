@@ -62,6 +62,7 @@ func (t *TerminalService) Run() error {
 		// Process with Gemini
 		err = t.ProcessWithGemini(input)
 		if err != nil {
+			// COMMENTED
 			// fmt.Printf("Error: %s\n", err)
 		}
 	}
@@ -76,7 +77,9 @@ func (t *TerminalService) ProcessWithGemini(query string) error {
 
 	cmdResponse, err := t.gemini.GetCommandFromGemini(ctx, t.terminal.SystemPrompt(), query, t.terminal.APIKey())
 	if err != nil {
-		return fmt.Errorf("gemini error: %v", err)
+		// COMMENTED
+		// return fmt.Errorf("gemini error: %v", err)
+		return nil
 	}
 
 	// Print the explanation
