@@ -62,8 +62,7 @@ func (t *TerminalService) Run() error {
 		// Process with Gemini
 		err = t.ProcessWithGemini(input)
 		if err != nil {
-			// COMMENTED
-			// fmt.Printf("Error: %s\n", err)
+			fmt.Printf("Error: %s\n", err)
 		}
 	}
 
@@ -77,9 +76,7 @@ func (t *TerminalService) ProcessWithGemini(query string) error {
 
 	cmdResponse, err := t.gemini.GetCommandFromGemini(ctx, t.terminal.SystemPrompt(), query, t.terminal.APIKey())
 	if err != nil {
-		// COMMENTED
-		// return fmt.Errorf("gemini error: %v", err)
-		return nil
+		return fmt.Errorf("gemini error: %v", err)
 	}
 
 	// Print the explanation
@@ -91,27 +88,6 @@ func (t *TerminalService) ProcessWithGemini(query string) error {
 
 	// Ask for confirmation before execution
 	return t.ConfirmAndExecute(cmdResponse)
-}
-
-// formatCommand formats a command and its arguments as a shell command string
-func (t *TerminalService) formatCommand(command string, args []string) string {
-	// Handle simple commands without args
-	if len(args) == 0 {
-		return command
-	}
-
-	// Format the command with arguments
-	var formattedArgs []string
-	for _, arg := range args {
-		// Quote arguments containing spaces
-		if strings.Contains(arg, " ") {
-			formattedArgs = append(formattedArgs, fmt.Sprintf("\"%s\"", arg))
-		} else {
-			formattedArgs = append(formattedArgs, arg)
-		}
-	}
-
-	return fmt.Sprintf("%s %s", command, strings.Join(formattedArgs, " "))
 }
 
 // ConfirmAndExecute asks for user confirmation before executing a command
@@ -209,10 +185,8 @@ func (t *TerminalService) EditAndExecuteCommand(cmdResponse dto.CommandResponse)
 		if b[0] == 27 && b[1] == 91 {
 			switch b[2] {
 			case 65: // Up arrow
-				// Could implement command history navigation if needed
 				continue
 			case 66: // Down arrow
-				// Could implement command history navigation if needed
 				continue
 			case 67: // Right arrow
 				if cursorPos < len(cmdBuffer) {
@@ -263,19 +237,6 @@ func (t *TerminalService) EditAndExecuteCommand(cmdResponse dto.CommandResponse)
 		return nil
 	}
 
-	// Parse the edited command
-	parts := strings.Fields(editedCmd)
-	if len(parts) == 0 {
-		return nil
-	}
-
-	// Create edited command response
-	editedCmdResponse := dto.CommandResponse{
-		Command:     parts[0],
-		Args:        parts[1:],
-		Explanation: "User-edited command",
-	}
-
 	// Restore terminal to its original state before executing the command
 	term.Restore(int(os.Stdin.Fd()), oldState)
 
@@ -285,7 +246,8 @@ func (t *TerminalService) EditAndExecuteCommand(cmdResponse dto.CommandResponse)
 
 	// Create a pipe to capture command output
 	cmdOutput := func() error {
-		cmd := exec.Command(editedCmdResponse.Command, editedCmdResponse.Args...)
+		// Use bash to support shell operators like &&
+		cmd := exec.Command("bash", "-c", editedCmd)
 		cmd.Stdout = &outputBuffer
 		cmd.Stderr = &errBuffer
 
@@ -307,6 +269,11 @@ func (t *TerminalService) EditAndExecuteCommand(cmdResponse dto.CommandResponse)
 	showResponse(stdout, stderr)
 
 	return err
+}
+
+// formatCommand combines command and args into a single string
+func (t *TerminalService) formatCommand(cmd string, args []string) string {
+	return cmd + " " + strings.Join(args, " ")
 }
 
 // ExecuteCommand runs the command returned by Gemini
