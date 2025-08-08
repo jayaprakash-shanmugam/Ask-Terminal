@@ -21,7 +21,7 @@ func NewGeminiService() *GeminiService {
 // GetCommandFromGemini sends the query to Gemini API and parses the response
 func (g *GeminiService) GetCommandFromGemini(ctx context.Context, systemPrompt, query, apiKey string) (dto.CommandResponse, error) {
 	// Updated API URL for Gemini
-	geminiURL := "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent"
+	geminiURL := "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
 
 	// Create request payload with system prompt as first message
 	requestBody := dto.GeminiRequest{

@@ -20,25 +20,29 @@ import (
 type TerminalService struct {
 	terminal *model.Terminal
 	gemini   *GeminiService
+	askMode  bool // New field to track ask mode
 }
 
 func NewTerminalService(terminal *model.Terminal, gemini *GeminiService) *TerminalService {
 	return &TerminalService{
 		terminal: terminal,
 		gemini:   gemini,
+		askMode:  true, // Default to ask mode
 	}
 }
 
 // Run starts the terminal
 func (t *TerminalService) Run() error {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("Gemini Terminal - Control your computer with natural language")
-	fmt.Println("Try commands like 'show all files', 'create a folder called data', or 'search for text files containing password'")
-	fmt.Println("Type 'exit' or 'quit' to end the session")
-	fmt.Println("Commands will be listed for your approval before execution")
+	t.showWelcome()
 
 	for t.terminal.IsRunning() {
-		fmt.Printf("%s ", t.terminal.Prompt())
+		// Show different prompts based on mode
+		if t.askMode {
+			fmt.Printf("🤖 %s ", t.terminal.Prompt())
+		} else {
+			fmt.Printf("💻 %s ", t.terminal.Prompt())
+		}
 
 		input, err := reader.ReadString('\n')
 		if err != nil {
@@ -52,6 +56,11 @@ func (t *TerminalService) Run() error {
 
 		t.terminal.AddToHistory(input)
 
+		// Handle mode switching and special commands
+		if t.handleSpecialCommands(input) {
+			continue
+		}
+
 		// Handle immediate exit command without calling API
 		if input == "exit" || input == "quit" {
 			t.terminal.SetRunning(false)
@@ -59,8 +68,13 @@ func (t *TerminalService) Run() error {
 			continue
 		}
 
-		// Process with Gemini
-		err = t.ProcessWithGemini(input)
+		// Process based on current mode
+		if t.askMode {
+			err = t.ProcessWithGemini(input)
+		} else {
+			err = t.ProcessDirectCommand(input)
+		}
+
 		if err != nil {
 			fmt.Printf("Error: %s\n", err)
 		}
@@ -69,12 +83,94 @@ func (t *TerminalService) Run() error {
 	return nil
 }
 
+func (t *TerminalService) showWelcome() {
+	fmt.Println("🚀 Enhanced Terminal - AI + Traditional Mode")
+	fmt.Println("════════════════════════════════════════════")
+	fmt.Println("🤖 Ask Mode: ON  - Use natural language commands")
+	fmt.Println("💻 Terminal Mode: Available with 'askmode off'")
+	fmt.Println()
+	fmt.Println("Try commands like:")
+	fmt.Println("  • 'show all files'")
+	fmt.Println("  • 'create a folder called data'")
+	fmt.Println("  • 'summarize current directory'")
+	fmt.Println("  • 'find all go files'")
+	fmt.Println("  • 'askmode off' to switch to traditional terminal")
+	fmt.Println()
+	fmt.Println("Type 'help' for more options or 'exit' to quit")
+	fmt.Println("════════════════════════════════════════════")
+}
+
+func (t *TerminalService) handleSpecialCommands(input string) bool {
+	switch strings.ToLower(input) {
+	case "askmode on", "ask on", "ai on":
+		t.askMode = true
+		fmt.Println("🤖 Ask Mode: ON - You can now use natural language commands")
+		return true
+	case "askmode off", "ask off", "ai off":
+		t.askMode = false
+		fmt.Println("💻 Terminal Mode: ON - Using traditional terminal commands")
+		return true
+	case "mode":
+		if t.askMode {
+			fmt.Println("🤖 Current Mode: Ask Mode (AI-assisted)")
+		} else {
+			fmt.Println("💻 Current Mode: Terminal Mode (traditional)")
+		}
+		return true
+	case "help":
+		t.ShowHelp()
+		return true
+	case "summarize", "summary":
+		if t.askMode {
+			t.summarizeDirectory()
+		} else {
+			fmt.Println("Use 'askmode on' to enable AI features like summarize")
+		}
+		return true
+	}
+	return false
+}
+
+// ProcessDirectCommand handles traditional terminal commands
+func (t *TerminalService) ProcessDirectCommand(input string) error {
+	// Parse command and arguments
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return nil
+	}
+
+	command := parts[0]
+	args := parts[1:]
+
+	// Create CommandResponse for consistency
+	cmdResponse := dto.CommandResponse{
+		Command:       command,
+		Args:          args,
+		Explanation:   fmt.Sprintf("Executing: %s", input),
+		SkipExecution: false,
+	}
+
+	// Execute directly without confirmation in terminal mode
+	return t.ExecuteCommand(cmdResponse)
+}
+
 // ProcessWithGemini sends the query to Gemini and lists/confirms the returned command
 func (t *TerminalService) ProcessWithGemini(query string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Increased timeout
 	defer cancel()
 
-	cmdResponse, err := t.gemini.GetCommandFromGemini(ctx, t.terminal.SystemPrompt(), query, t.terminal.APIKey())
+	dirInfo := t.CollectDirectoryContext()
+	systemPrompt := fmt.Sprintf(
+		"%s\n\nThe current directory contains the following files and folders:\n%s",
+		t.terminal.SystemPrompt(), dirInfo,
+	)
+
+	// Handle special AI queries
+	if t.isAnalysisQuery(query) {
+		return t.handleAnalysisQuery(query, dirInfo)
+	}
+
+	cmdResponse, err := t.gemini.GetCommandFromGemini(ctx, systemPrompt, query, t.terminal.APIKey())
 	if err != nil {
 		return fmt.Errorf("gemini error: %v", err)
 	}
@@ -82,12 +178,193 @@ func (t *TerminalService) ProcessWithGemini(query string) error {
 	// Print the explanation
 	fmt.Printf("\033[32m💡 %s\033[0m\n", cmdResponse.Explanation)
 
+	if cmdResponse.SkipExecution {
+		fmt.Println("💬", strings.Join(cmdResponse.Args, " "))
+		return nil
+	}
+
 	// Format and display the command
 	commandString := t.formatCommand(cmdResponse.Command, cmdResponse.Args)
 	fmt.Printf("\033[33mCommand: %s\033[0m\n", commandString)
 
 	// Ask for confirmation before execution
 	return t.ConfirmAndExecute(cmdResponse)
+}
+
+func (t *TerminalService) isAnalysisQuery(query string) bool {
+	analysisKeywords := []string{
+		"summarize", "summary", "analyze", "analysis", "describe", "overview",
+		"what files", "what folders", "content", "structure", "explain",
+	}
+
+	lowerQuery := strings.ToLower(query)
+	for _, keyword := range analysisKeywords {
+		if strings.Contains(lowerQuery, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *TerminalService) handleAnalysisQuery(query, dirInfo string) error {
+	fmt.Printf("\033[32m💡 Analyzing directory structure and contents\033[0m\n")
+
+	// Enhanced directory analysis
+	analysis := t.analyzeDirectoryStructure(dirInfo)
+	fmt.Println(analysis)
+
+	return nil
+}
+
+func (t *TerminalService) analyzeDirectoryStructure(dirInfo string) string {
+	var analysis strings.Builder
+
+	lines := strings.Split(strings.TrimSpace(dirInfo), "\n")
+	if len(lines) == 0 {
+		return "📁 Directory appears to be empty"
+	}
+
+	fileCount := 0
+	dirCount := 0
+	fileTypes := make(map[string]int)
+
+	analysis.WriteString("📊 Directory Analysis:\n")
+	analysis.WriteString("═══════════════════════\n\n")
+
+	// Count items and categorize
+	for _, line := range lines {
+		if strings.HasPrefix(line, "[DIR]") {
+			dirCount++
+		} else if strings.HasPrefix(line, "[FILE]") {
+			fileCount++
+			// Extract file extension
+			parts := strings.Fields(line)
+			if len(parts) > 1 {
+				filename := parts[1]
+				ext := filepath.Ext(filename)
+				if ext != "" {
+					fileTypes[ext]++
+				} else {
+					fileTypes["no extension"]++
+				}
+			}
+		}
+	}
+
+	analysis.WriteString(fmt.Sprintf("📂 Directories: %d\n", dirCount))
+	analysis.WriteString(fmt.Sprintf("📄 Files: %d\n\n", fileCount))
+
+	if len(fileTypes) > 0 {
+		analysis.WriteString("📋 File Types:\n")
+		for ext, count := range fileTypes {
+			if ext == "no extension" {
+				analysis.WriteString(fmt.Sprintf("  • No extension: %d\n", count))
+			} else {
+				analysis.WriteString(fmt.Sprintf("  • %s files: %d\n", ext, count))
+			}
+		}
+		analysis.WriteString("\n")
+	}
+
+	// Show structure
+	analysis.WriteString("🗂️  Directory Structure:\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "[DIR]") {
+			parts := strings.Fields(line)
+			if len(parts) > 1 {
+				analysis.WriteString(fmt.Sprintf("  📁 %s/\n", parts[1]))
+			}
+		}
+	}
+
+	analysis.WriteString("\n📄 Files:\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "[FILE]") {
+			parts := strings.Fields(line)
+			if len(parts) > 1 {
+				filename := parts[1]
+				ext := filepath.Ext(filename)
+				icon := t.getFileIcon(ext)
+				analysis.WriteString(fmt.Sprintf("  %s %s\n", icon, filename))
+			}
+		}
+	}
+
+	return analysis.String()
+}
+
+func (t *TerminalService) getFileIcon(ext string) string {
+	switch ext {
+	case ".go":
+		return "🐹"
+	case ".js", ".ts":
+		return "📜"
+	case ".html", ".htm":
+		return "🌐"
+	case ".css":
+		return "🎨"
+	case ".md":
+		return "📖"
+	case ".json":
+		return "⚙️"
+	case ".txt":
+		return "📝"
+	case ".pdf":
+		return "📄"
+	case ".jpg", ".jpeg", ".png", ".gif":
+		return "🖼️"
+	case ".mp4", ".avi", ".mov":
+		return "🎥"
+	case ".mp3", ".wav":
+		return "🎵"
+	case ".zip", ".tar", ".gz":
+		return "📦"
+	default:
+		return "📄"
+	}
+}
+
+func (t *TerminalService) summarizeDirectory() {
+	dirInfo := t.CollectDirectoryContext()
+	analysis := t.analyzeDirectoryStructure(dirInfo)
+	fmt.Println(analysis)
+}
+
+func (t *TerminalService) CollectDirectoryContext() string {
+	var builder strings.Builder
+
+	err := filepath.Walk(t.terminal.WorkingDir(), func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Ignore errors
+		}
+		relPath, _ := filepath.Rel(t.terminal.WorkingDir(), path)
+		if relPath == "." {
+			return nil
+		}
+
+		// Skip hidden files and common ignore patterns
+		if strings.HasPrefix(info.Name(), ".") ||
+			info.Name() == "node_modules" ||
+			info.Name() == "vendor" {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if info.IsDir() {
+			builder.WriteString(fmt.Sprintf("[DIR]  %s\n", relPath))
+		} else {
+			builder.WriteString(fmt.Sprintf("[FILE] %s\n", relPath))
+		}
+		return nil
+	})
+
+	if err != nil {
+		return "Unable to read directory"
+	}
+
+	return builder.String()
 }
 
 // ConfirmAndExecute asks for user confirmation before executing a command
@@ -321,6 +598,12 @@ func (t *TerminalService) ChangeDirectory(args []string) error {
 		dir = os.Getenv("HOME")
 	} else {
 		dir = args[0]
+
+		// Manually expand ~ to HOME
+		if strings.HasPrefix(dir, "~") {
+			home := os.Getenv("HOME")
+			dir = filepath.Join(home, strings.TrimPrefix(dir, "~"))
+		}
 	}
 
 	// Handle relative paths
@@ -339,29 +622,49 @@ func (t *TerminalService) ChangeDirectory(args []string) error {
 
 // ShowHistory displays command history
 func (t *TerminalService) ShowHistory() {
+	fmt.Println("📜 Command History:")
+	fmt.Println("═══════════════════")
 	for i, cmd := range t.terminal.History() {
-		fmt.Printf("%d: %s\n", i+1, cmd)
+		fmt.Printf("%3d: %s\n", i+1, cmd)
 	}
 }
 
 // ShowHelp displays help information
 func (t *TerminalService) ShowHelp() {
-	fmt.Println("Gemini Terminal Help:")
-	fmt.Println("  Just type what you want to do in natural language!")
-	fmt.Println("  For example:")
-	fmt.Println("    - \"show me all text files\"")
-	fmt.Println("    - \"create a folder called projects\"")
-	fmt.Println("    - \"search for files modified in the last week\"")
-	fmt.Println("    - \"compress all the images in this folder\"")
+	fmt.Println("🚀 Enhanced Terminal Help")
+	fmt.Println("═════════════════════════")
 	fmt.Println()
-	fmt.Println("  When a command is suggested:")
-	fmt.Println("    - Press 'y' to execute the command")
-	fmt.Println("    - Press 'n' to skip execution")
-	fmt.Println("    - Press 'e' to edit the command before execution")
+	fmt.Println("🤖 Ask Mode Commands (AI-assisted):")
+	fmt.Println("  • 'show me all text files'")
+	fmt.Println("  • 'create a folder called projects'")
+	fmt.Println("  • 'search for files modified in the last week'")
+	fmt.Println("  • 'summarize current directory'")
+	fmt.Println("  • 'find all go files'")
+	fmt.Println("  • 'is there any file called main.go?'")
+	fmt.Println("  • 'run that go file'")
 	fmt.Println()
-	fmt.Println("  Some built-in commands:")
-	fmt.Println("    - \"exit\" or \"quit\": Exit the terminal")
-	fmt.Println("    - \"clear\": Clear the screen")
-	fmt.Println("    - \"history\": Show command history")
-	fmt.Println("    - \"help\": Display this help")
+	fmt.Println("💻 Terminal Mode Commands (traditional):")
+	fmt.Println("  • ls, dir - list files")
+	fmt.Println("  • cd <directory> - change directory")
+	fmt.Println("  • pwd - show current directory")
+	fmt.Println("  • mkdir <name> - create directory")
+	fmt.Println("  • touch <name> - create file")
+	fmt.Println("  • cat <file> - view file content")
+	fmt.Println()
+	fmt.Println("🔄 Mode Switching:")
+	fmt.Println("  • 'askmode on' or 'ai on' - Enable AI mode")
+	fmt.Println("  • 'askmode off' or 'ai off' - Enable terminal mode")
+	fmt.Println("  • 'mode' - Show current mode")
+	fmt.Println()
+	fmt.Println("🛠️  Special Commands:")
+	fmt.Println("  • 'summarize' - Analyze current directory")
+	fmt.Println("  • 'history' - Show command history")
+	fmt.Println("  • 'clear' - Clear screen")
+	fmt.Println("  • 'help' - Show this help")
+	fmt.Println("  • 'exit' or 'quit' - Exit terminal")
+	fmt.Println()
+	fmt.Println("⚡ Command Execution:")
+	fmt.Println("  • Press 'y' to execute suggested command")
+	fmt.Println("  • Press 'n' to skip execution")
+	fmt.Println("  • Press 'e' to edit command before execution")
 }

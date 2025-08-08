@@ -3,12 +3,18 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"askterminal/internal/model"
 	"askterminal/internal/service"
 )
 
 func main() {
+	// Setup graceful shutdown
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
 	// Create terminal model
 	terminalModel := model.NewTerminal()
 
@@ -17,6 +23,14 @@ func main() {
 
 	// Create terminal service
 	terminalService := service.NewTerminalService(terminalModel, geminiService)
+
+	// Handle graceful shutdown
+	go func() {
+		<-c
+		fmt.Println("\n🛑 Shutting down gracefully...")
+		terminalModel.SetRunning(false)
+		os.Exit(0)
+	}()
 
 	// Run the terminal
 	if err := terminalService.Run(); err != nil {

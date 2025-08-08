@@ -20,47 +20,13 @@ func EnsureAPIKey() string {
 		return apiKey
 	}
 
-	// Try to read from .env file
-	// apiKey = readAPIKeyFromFile()
-	// if apiKey != "" {
-	// 	return apiKey
-	// }
-
 	// If no API key found, prompt user to enter
 	apiKey = promptForAPIKey()
 	// Set the environment variable
 	os.Setenv("GEMINI_API_KEY", apiKey)
 
-	// Verify it
-	// fmt.Println("GEMINI_API_KEY set to:", os.Getenv("GEMINI_API_KEY"))
-
-	// Write the API key to .env file
-	// err := writeAPIKeyToFile(apiKey)
-	// if err != nil {
-	// 	log.Printf("Error writing API key to file: %v", err)
-	// }
-
 	return apiKey
 }
-
-// readAPIKeyFromFile reads the API key from .env file
-// func readAPIKeyFromFile() string {
-// 	file, err := os.Open(envFileName)
-// 	if err != nil {
-// 		return ""
-// 	}
-// 	defer file.Close()
-
-// 	scanner := bufio.NewScanner(file)
-// 	for scanner.Scan() {
-// 		line := scanner.Text()
-// 		if strings.HasPrefix(line, "GEMINI_API_KEY=") {
-// 			return strings.TrimPrefix(line, "GEMINI_API_KEY=")
-// 		}
-// 	}
-
-// 	return ""
-// }
 
 // promptForAPIKey asks user to input API key
 func promptForAPIKey() string {
@@ -88,20 +54,6 @@ func promptForAPIKey() string {
 		return apiKey
 	}
 }
-
-// writeAPIKeyToFile writes the API key to .env file
-// func writeAPIKeyToFile(apiKey string) error {
-// 	// Open file with write and create permissions
-// 	file, err := os.Create(envFileName)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	defer file.Close()
-
-// 	// Write the API key to the file
-// 	_, err = file.WriteString(fmt.Sprintf("GEMINI_API_KEY=%s\n", apiKey))
-// 	return err
-// }
 
 // LoadAPIKey is a convenience method to get the API key
 func LoadAPIKey() string {
