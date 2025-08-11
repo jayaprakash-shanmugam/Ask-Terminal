@@ -185,6 +185,41 @@ func (t *TerminalService) ProcessWithGemini(query string) error {
 		return fmt.Errorf("gemini error: %v", err)
 	}
 
+	if cmdResponse.MultiExec {
+		fmt.Println("🔄 Multiple commands detected. Executing step-by-step:")
+
+		for idx, multiCmd := range cmdResponse.MultiCommands {
+			// Show step header
+			fmt.Printf("\n[Step %d/%d] %s\n", idx+1, len(cmdResponse.MultiCommands), multiCmd.Explanation)
+
+			// Format and show the command
+			commandString := t.formatCommand(multiCmd.Command, multiCmd.Args)
+			fmt.Printf("\033[33mCommand: %s\033[0m\n", commandString)
+
+			// Prepare a CommandResponse for execution
+			commandRes := dto.CommandResponse{
+				Command:       multiCmd.Command,
+				Args:          multiCmd.Args,
+				Explanation:   multiCmd.Explanation,
+				SkipExecution: multiCmd.SkipExecution,
+			}
+
+			// If SkipExecution is true, just display without executing
+			if multiCmd.SkipExecution {
+				fmt.Println("⚠️ This step is marked to skip execution.")
+				continue
+			}
+
+			// Confirm and execute the command
+			if err := t.ConfirmAndExecute(commandRes); err != nil {
+				fmt.Printf("❌ Error executing command: %s\n", err)
+				return err
+			}
+			fmt.Println("✅ Step completed successfully")
+		}
+		return nil
+	}
+
 	// Print the explanation
 	fmt.Printf("\033[32m💡 %s\033[0m\n", cmdResponse.Explanation)
 

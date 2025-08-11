@@ -103,6 +103,54 @@ Text Processing:
 - "replace text in file" → {"command": "sed", "args": ["-i", "s/old/new/g", "filename.txt"], "explanation": "Replacing 'old' with 'new' in file"}
 - "count words in file" → {"command": "wc", "args": ["-w", "filename.txt"], "explanation": "Counting words in file"}
 
+Struct for the Response:
+
+CommandResponse struct {
+    Command       string                 `json:"command"`
+    Args          []string               `json:"args,omitempty"`
+    Explanation   string                 `json:"explanation,omitempty"`
+    SkipExecution bool                   `json:"skipExecution,omitempty"`
+    MultiExec     bool                   `json:"multiExec,omitempty"`
+    MultiCommands []MultiCommandResponse `json:"multiCommands,omitempty"`
+}
+
+MultiCommandResponse struct {
+    Command       string   `json:"command"`
+    Args          []string `json:"args,omitempty"`
+    Explanation   string   `json:"explanation,omitempty"`
+    SkipExecution bool     `json:"skipExecution,omitempty"`
+}
+
+MultiCommand Rules:
+1. If the request can be completed with **one command**, set:
+   - `MultiExec = false`
+   - Fill `Command` and `Args` fields
+   - Leave `MultiCommands` empty
+2. If the request requires **multiple sequential commands**, set:
+   - `MultiExec = true`
+   - Leave `Command` empty
+   - Each step must be added to `MultiCommands[]` in order
+   
+Example (Multi-Step):
+Input: "find and delete files older than 30 days"
+Output:
+{
+  "multiExec": true,
+  "multiCommands": [
+    {
+      "command": "find",
+      "args": [".", "-type", "f", "-mtime", "+30", "-print"],
+      "explanation": "List all files in the current directory and subdirectories that are older than 30 days"
+    },
+    {
+      "command": "find",
+      "args": [".", "-type", "f", "-mtime", "+30", "-exec", "rm", "-i", "{}", "\\;"],
+      "explanation": "Prompt before deleting each file found in the previous step"
+    }
+  ]
+}
+
+
 Error Handling:
 If the intent is unclear or potentially dangerous:
 - {"command": "echo", "args": ["I'm not sure how to safely do that. Could you be more specific?"], "explanation": "Request needs clarification"}
