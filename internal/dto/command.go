@@ -2,6 +2,15 @@ package dto
 
 // CommandResponse represents the structured output from Gemini
 type CommandResponse struct {
+	Command       string                 `json:"command"`
+	Args          []string               `json:"args,omitempty"`
+	Explanation   string                 `json:"explanation,omitempty"`
+	SkipExecution bool                   `json:"skipExecution,omitempty"`
+	MultiExec     bool                   `json:"multiExec,omitempty"`
+	MultiCommands []MultiCommandResponse `json:"multiCommands,omitempty"`
+}
+
+type MultiCommandResponse struct {
 	Command       string   `json:"command"`
 	Args          []string `json:"args,omitempty"`
 	Explanation   string   `json:"explanation,omitempty"`
