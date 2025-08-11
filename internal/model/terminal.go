@@ -2,8 +2,36 @@ package model
 
 import (
 	"askterminal/internal/utils"
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
+	"os/user"
+	"strings"
+	"time"
+)
+
+// Theme-adaptive colors that work on both light and dark backgrounds
+const (
+	reset = "\033[0m"
+	bold  = "\033[1m"
+	dim   = "\033[2m"
+
+	// Safe colors that work on both light and dark backgrounds
+	brightBlue    = "\033[94m" // Bright blue - visible on both
+	brightGreen   = "\033[92m" // Bright green - visible on both
+	brightYellow  = "\033[93m" // Bright yellow - visible on both
+	brightRed     = "\033[91m" // Bright red - visible on both
+	brightMagenta = "\033[95m" // Bright magenta - visible on both
+	brightCyan    = "\033[96m" // Bright cyan - visible on both
+
+	// Neutral colors
+	darkGray     = "\033[90m" // Dark gray - good for secondary info
+	defaultColor = "\033[39m" // Terminal default color
+
+	// Symbols that work universally
+	symbolFolder = "📁"
+	symbolFile   = "📄"
 )
 
 // Terminal represents our Gemini-enhanced terminal
@@ -14,6 +42,32 @@ type Terminal struct {
 	running      bool
 	apiKey       string
 	systemPrompt string
+	config       *TerminalConfig
+	askMode      bool
+}
+
+// Terminal configuration based on environment variables
+type TerminalConfig struct {
+	Style     string // enhanced
+	ShowTime  bool
+	ShowFiles bool
+	ShowGit   bool
+	ShowUser  bool
+}
+
+// Terminal status information
+type TerminalStatus struct {
+	Mode        string
+	GitBranch   string
+	GitStatus   string
+	FileCount   int
+	DirCount    int
+	Username    string
+	Hostname    string
+	CurrentTime string
+	LastCommand string
+	CommandTime time.Duration
+	PathDisplay string
 }
 
 // NewTerminal creates a new terminal instance
@@ -25,141 +79,227 @@ func NewTerminal() *Terminal {
 	fmt.Println("API Key successfully loaded:", apiKey[:5]+"...")
 
 	// System prompt that instructs Gemini how to interpret commands
-	systemPrompt := `You are an intelligent terminal assistant that translates natural language into executable shell commands.
-Your task is to interpret user input and convert it to appropriate shell commands for file operations, navigation, searching, and system tasks.
+	systemPrompt := utils.SystemPrompt
 
-Always respond with a JSON object containing:
-1. "command": The main command to execute (e.g., "find", "ls", "mkdir", "cd", "grep", "go")
-2. "args": An array of command arguments
-3. "explanation": A clear explanation of what the command does
-4. "skipExecution" (optional, boolean): Set to true if the result can be determined from context
-
-COMMAND EXAMPLES:
-
-File Operations:
-- "show me all files" → {"command": "ls", "args": ["-la"], "explanation": "Listing all files including hidden ones"}
-- "show all text files" → {"command": "find", "args": [".", "-name", "*.txt"], "explanation": "Finding all .txt files"}
-- "create a folder called data" → {"command": "mkdir", "args": ["data"], "explanation": "Creating directory named 'data'"}
-- "create a file named test.txt" → {"command": "touch", "args": ["test.txt"], "explanation": "Creating empty file test.txt"}
-- "copy file.txt to backup.txt" → {"command": "cp", "args": ["file.txt", "backup.txt"], "explanation": "Copying file.txt to backup.txt"}
-- "move file.txt to archive/" → {"command": "mv", "args": ["file.txt", "archive/"], "explanation": "Moving file.txt to archive directory"}
-- "delete file.txt" → {"command": "rm", "args": ["file.txt"], "explanation": "Removing file.txt"}
-- "delete empty directory" → {"command": "rmdir", "args": ["dirname"], "explanation": "Removing empty directory"}
-
-Navigation:
-- "go to home" → {"command": "cd", "args": ["~"], "explanation": "Changing to home directory"}
-- "go to parent directory" → {"command": "cd", "args": [".."], "explanation": "Going up one directory level"}
-- "go to projects folder" → {"command": "cd", "args": ["projects"], "explanation": "Changing to projects directory"}
-- "where am i" → {"command": "pwd", "args": [], "explanation": "Showing current directory path"}
-- "list directories only" → {"command": "ls", "args": ["-d", "*/"], "explanation": "Showing only directories"}
-
-Search Operations:
-- "find all go files" → {"command": "find", "args": [".", "-name", "*.go"], "explanation": "Finding all Go source files"}
-- "find files with 'main' in name" → {"command": "find", "args": [".", "-name", "*main*"], "explanation": "Finding files containing 'main' in filename"}
-- "is there any file called main.go?" → {"command": "find", "args": [".", "-name", "main.go"], "explanation": "Looking for main.go file"}
-- "search for files containing password" → {"command": "grep", "args": ["-r", "password", "."], "explanation": "Searching for 'password' text in all files"}
-- "find large files" → {"command": "find", "args": [".", "-type", "f", "-size", "+100M"], "explanation": "Finding files larger than 100MB"}
-- "find recent files" → {"command": "find", "args": [".", "-type", "f", "-mtime", "-7"], "explanation": "Finding files modified in last 7 days"}
-
-File Content:
-- "show content of main.go" → {"command": "cat", "args": ["main.go"], "explanation": "Displaying contents of main.go"}
-- "show first 10 lines of file.txt" → {"command": "head", "args": ["-n", "10", "file.txt"], "explanation": "Showing first 10 lines"}
-- "show last 20 lines of log.txt" → {"command": "tail", "args": ["-n", "20", "log.txt"], "explanation": "Showing last 20 lines"}
-- "count lines in main.go" → {"command": "wc", "args": ["-l", "main.go"], "explanation": "Counting lines in main.go"}
-- "show file size" → {"command": "du", "args": ["-sh", "filename"], "explanation": "Showing file size in human readable format"}
-
-Programming:
-- "run the go file" → {"command": "go", "args": ["run", "main.go"], "explanation": "Compiling and running main.go"}
-- "run that go file" → {"command": "go", "args": ["run", "main.go"], "explanation": "Compiling and running main.go"}
-- "build this go project" → {"command": "go", "args": ["build"], "explanation": "Building the Go project"}
-- "install go dependencies" → {"command": "go", "args": ["mod", "tidy"], "explanation": "Installing and organizing Go modules"}
-- "initialize go module" → {"command": "go", "args": ["mod", "init", "project-name"], "explanation": "Initializing new Go module"}
-- "test go code" → {"command": "go", "args": ["test"], "explanation": "Running Go tests"}
-- "format go code" → {"command": "go", "args": ["fmt", "./..."], "explanation": "Formatting all Go files"}
-
-Node.js/JavaScript:
-- "install npm packages" → {"command": "npm", "args": ["install"], "explanation": "Installing Node.js dependencies"}
-- "run npm start" → {"command": "npm", "args": ["start"], "explanation": "Starting the Node.js application"}
-- "run node script" → {"command": "node", "args": ["script.js"], "explanation": "Running JavaScript file with Node.js"}
-
-Python:
-- "run python script" → {"command": "python", "args": ["script.py"], "explanation": "Running Python script"}
-- "install python package" → {"command": "pip", "args": ["install", "package-name"], "explanation": "Installing Python package"}
-- "create python virtual environment" → {"command": "python", "args": ["-m", "venv", "venv"], "explanation": "Creating Python virtual environment"}
-
-System Operations:
-- "show disk usage" → {"command": "df", "args": ["-h"], "explanation": "Displaying disk space usage"}
-- "show directory size" → {"command": "du", "args": ["-sh", "."], "explanation": "Showing current directory size"}
-- "show system processes" → {"command": "ps", "args": ["aux"], "explanation": "Listing all running processes"}
-- "show memory usage" → {"command": "free", "args": ["-h"], "explanation": "Displaying memory usage"}
-- "show system info" → {"command": "uname", "args": ["-a"], "explanation": "Showing system information"}
-- "clear the screen" → {"command": "clear", "args": [], "explanation": "Clearing terminal screen"}
-- "show environment variables" → {"command": "env", "args": [], "explanation": "Displaying environment variables"}
-
-File Permissions:
-- "make file executable" → {"command": "chmod", "args": ["+x", "filename"], "explanation": "Making file executable"}
-- "change file permissions" → {"command": "chmod", "args": ["755", "filename"], "explanation": "Setting file permissions to 755"}
-- "show file permissions" → {"command": "ls", "args": ["-l", "filename"], "explanation": "Showing detailed file information including permissions"}
-
-Network/Connectivity:
-- "ping google" → {"command": "ping", "args": ["-c", "4", "google.com"], "explanation": "Pinging google.com 4 times"}
-- "check internet connection" → {"command": "curl", "args": ["-I", "http://google.com"], "explanation": "Checking internet connectivity"}
-- "download file from url" → {"command": "wget", "args": ["http://example.com/file.txt"], "explanation": "Downloading file from URL"}
-
-Archive Operations:
-- "compress folder" → {"command": "tar", "args": ["-czf", "archive.tar.gz", "foldername"], "explanation": "Creating compressed archive"}
-- "extract tar file" → {"command": "tar", "args": ["-xzf", "archive.tar.gz"], "explanation": "Extracting tar.gz archive"}
-- "create zip file" → {"command": "zip", "args": ["-r", "archive.zip", "foldername"], "explanation": "Creating ZIP archive"}
-- "extract zip file" → {"command": "unzip", "args": ["archive.zip"], "explanation": "Extracting ZIP archive"}
-
-Advanced Queries:
-- "files modified today" → {"command": "find", "args": [".", "-type", "f", "-mtime", "0"], "explanation": "Finding files modified today"}
-- "largest files in this directory" → {"command": "ls", "args": ["-lSh"], "explanation": "Listing files sorted by size (largest first)"}
-- "count lines in all go files" → {"command": "find", "args": [".", "-name", "*.go", "-exec", "wc", "-l", "{}", "+"], "explanation": "Counting lines in all Go files"}
-- "find duplicate files" → {"command": "find", "args": [".", "-type", "f", "-exec", "md5sum", "{}", "+"], "explanation": "Finding potential duplicate files using checksums"}
-- "show directory tree" → {"command": "tree", "args": ["."], "explanation": "Displaying directory structure as a tree"}
-
-Context-Based Responses:
-If the directory listing shows a file exists and user asks about it:
-- "is there any main.go file?" (when main.go is visible) → {"command": "echo", "args": ["✅ Yes, main.go exists in the current directory"], "explanation": "Confirming file existence based on directory contents", "skipExecution": true}
-- "do I have any go files?" (when *.go files are visible) → {"command": "echo", "args": ["✅ Yes, found Go files: main.go, service.go"], "explanation": "Listing Go files found in directory context", "skipExecution": true}
-
-Text Processing:
-- "sort lines in file" → {"command": "sort", "args": ["filename.txt"], "explanation": "Sorting lines in file alphabetically"}
-- "remove duplicate lines" → {"command": "sort", "args": ["-u", "filename.txt"], "explanation": "Removing duplicate lines from file"}
-- "replace text in file" → {"command": "sed", "args": ["-i", "s/old/new/g", "filename.txt"], "explanation": "Replacing 'old' with 'new' in file"}
-- "count words in file" → {"command": "wc", "args": ["-w", "filename.txt"], "explanation": "Counting words in file"}
-
-Error Handling:
-If the intent is unclear or potentially dangerous:
-- {"command": "echo", "args": ["I'm not sure how to safely do that. Could you be more specific?"], "explanation": "Request needs clarification"}
-- For dangerous commands like "delete everything": {"command": "echo", "args": ["⚠️ That operation could be dangerous. Please specify exactly what you want to delete."], "explanation": "Safety check for potentially harmful operations"}
-
-IMPORTANT GUIDELINES:
-1. Always prioritize safety - never suggest commands that could harm the system (rm -rf /, formatting drives, etc.)
-2. Use relative paths when appropriate (. for current directory)
-3. For file searches, use appropriate wildcards (*.go, *.txt, etc.)
-4. When files are listed in the context, reference them directly and provide skipExecution responses when possible
-5. Prefer commonly available Unix/Linux commands
-6. Use appropriate flags for better output formatting (-h for human readable, -l for long format, etc.)
-7. For programming tasks, assume common tools (go, node, python, etc.) are available
-8. When user says "run that file" or "execute it", look for the most recently mentioned executable file in context
-9. For ambiguous references like "that file", "this project", use context clues from directory listing
-10. Always provide clear, helpful explanations of what each command does`
+	// Load configuration from environment
+	config := loadConfigFromEnv()
 
 	return &Terminal{
-		prompt:       "☸ ",
 		history:      []string{},
 		workingDir:   wd,
 		running:      true,
 		apiKey:       apiKey,
 		systemPrompt: systemPrompt,
+		config:       config,
 	}
 }
 
-// Getters to expose private fields
+// Load configuration from environment variables
+func loadConfigFromEnv() *TerminalConfig {
+	config := &TerminalConfig{
+		ShowTime:  getEnvBool("ASK_TERMINAL_SHOW_TIME", true),
+		ShowFiles: getEnvBool("ASK_TERMINAL_SHOW_FILES", true),
+		ShowGit:   getEnvBool("ASK_TERMINAL_SHOW_GIT", true),
+		ShowUser:  getEnvBool("ASK_TERMINAL_SHOW_USER", true),
+	}
+
+	return config
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		return strings.ToLower(value) == "true" || value == "1"
+	}
+	return defaultValue
+}
+
+// Main prompt method that delegates based on configuration
 func (t *Terminal) Prompt() string {
-	return t.prompt
+	return t.PromptWithMode("terminal")
+}
+
+func (t *Terminal) PromptWithMode(mode string) string {
+	// Always update working directory
+	wd, _ := os.Getwd()
+	t.workingDir = wd
+
+	return t.enhancedPrompt(mode)
+}
+
+// Enhanced prompt with full status information
+func (t *Terminal) enhancedPrompt(mode string) string {
+	status := t.gatherStatus(mode)
+
+	var prompt strings.Builder
+
+	// Main prompt line
+	prompt.WriteString(t.buildMainPromptLine(status))
+
+	return prompt.String()
+}
+
+func (t *Terminal) buildMainPromptLine(status *TerminalStatus) string {
+	var line strings.Builder
+
+	// Path with folder icon
+	line.WriteString(fmt.Sprintf("%s%s%s",
+		bold, status.PathDisplay, reset))
+
+	// Git branch on same line (compact)
+	if t.config.ShowGit && status.GitBranch != "" {
+		gitColor := brightGreen
+		if status.GitStatus != "clean" {
+			gitColor = brightYellow
+		}
+		line.WriteString(fmt.Sprintf(" %s(%s)%s", gitColor, status.GitBranch, reset))
+	}
+
+	// Mode indicator
+	var modeIndicator string
+	if t.askMode {
+		modeIndicator = fmt.Sprintf(" %smode:ask%s", brightMagenta, reset)
+	} else {
+		modeIndicator = fmt.Sprintf(" %smode:terminal%s", brightBlue, reset)
+	}
+	line.WriteString(modeIndicator)
+
+	// Time
+	if t.config.ShowTime {
+		line.WriteString(fmt.Sprintf(" %s%s",
+			status.CurrentTime, reset))
+	}
+
+	// User info
+	if t.config.ShowUser && status.Username != "" {
+		line.WriteString(fmt.Sprintf(" %s%s",
+			status.Username, reset))
+	}
+
+	// New line with prompt symbol
+	line.WriteString(fmt.Sprintf("\n❯%s ", reset))
+
+	return line.String()
+}
+
+func (t *Terminal) gatherStatus(mode string) *TerminalStatus {
+	wd, _ := os.Getwd()
+	homeDir, _ := os.UserHomeDir()
+	displayPath := strings.Replace(wd, homeDir, "~", 1)
+
+	status := &TerminalStatus{
+		Mode:        mode,
+		CurrentTime: time.Now().Format("15:04:05"),
+		PathDisplay: displayPath,
+	}
+
+	// Get git info
+	status.GitBranch = t.getCurrentBranch()
+	status.GitStatus = t.getGitStatus()
+
+	// Count files and directories
+	status.FileCount, status.DirCount = t.countItems()
+
+	// Get user info
+	if user, err := user.Current(); err == nil {
+		status.Username = user.Username
+	}
+
+	if hostname, err := os.Hostname(); err == nil {
+		status.Hostname = hostname
+	}
+
+	return status
+}
+
+func (t *Terminal) getCurrentBranch() string {
+	cmd := exec.Command("git", "branch", "--show-current")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = nil
+
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(out.String())
+}
+
+func (t *Terminal) getGitStatus() string {
+	cmd := exec.Command("git", "status", "--porcelain")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = nil
+
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+
+	output := strings.TrimSpace(out.String())
+	if output == "" {
+		return "clean"
+	}
+
+	lines := strings.Split(output, "\n")
+	modified := 0
+	untracked := 0
+	staged := 0
+
+	for _, line := range lines {
+		if len(line) >= 2 {
+			switch {
+			case line[0] != ' ' && line[0] != '?' && line[0] != '!':
+				staged++
+			case line[1] == 'M':
+				modified++
+			case line[0] == '?' && line[1] == '?':
+				untracked++
+			}
+		}
+	}
+
+	var parts []string
+	if staged > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", staged))
+	}
+	if modified > 0 {
+		parts = append(parts, fmt.Sprintf("~%d", modified))
+	}
+	if untracked > 0 {
+		parts = append(parts, fmt.Sprintf("?%d", untracked))
+	}
+
+	if len(parts) == 0 {
+		return "clean"
+	}
+
+	return strings.Join(parts, " ")
+}
+
+func (t *Terminal) countItems() (files, dirs int) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return 0, 0
+	}
+
+	entries, err := os.ReadDir(wd)
+	if err != nil {
+		return 0, 0
+	}
+
+	for _, entry := range entries {
+		// Skip hidden files
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		if entry.IsDir() {
+			dirs++
+		} else {
+			files++
+		}
+	}
+
+	return files, dirs
 }
 
 func (t *Terminal) History() []string {
@@ -193,4 +333,51 @@ func (t *Terminal) SetWorkingDir(dir string) {
 
 func (t *Terminal) AddToHistory(command string) {
 	t.history = append(t.history, command)
+}
+
+// Configuration methods
+func (t *Terminal) GetConfig() *TerminalConfig {
+	return t.config
+}
+
+func (t *Terminal) SetPromptStyle(style string) {
+	t.config.Style = style
+}
+
+func (t *Terminal) ToggleTime() {
+	t.config.ShowTime = !t.config.ShowTime
+}
+
+func (t *Terminal) ToggleFiles() {
+	t.config.ShowFiles = !t.config.ShowFiles
+}
+
+func (t *Terminal) ToggleGit() {
+	t.config.ShowGit = !t.config.ShowGit
+}
+
+func (t *Terminal) ToggleUser() {
+	t.config.ShowUser = !t.config.ShowUser
+}
+
+// Backward compatibility - remove the old GetCurrentBranch function
+func GetCurrentBranch() string {
+	cmd := exec.Command("git", "branch", "--show-current")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = nil
+
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(out.String())
+}
+
+func (t *Terminal) SetToAskMode() {
+	t.askMode = true
+}
+
+func (t *Terminal) SetToShellMode() {
+	t.askMode = false
 }
