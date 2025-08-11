@@ -65,8 +65,8 @@ askterminal
 ### Switch Modes
 ```bash
 mode          # Check current mode
-mode ai       # Switch to AI mode  
-mode shell    # Switch to traditional shell mode
+askmode on       # Switch to AI mode  
+askmode off    # Switch to traditional shell mode
 help          # Show available commands
 ```
 
