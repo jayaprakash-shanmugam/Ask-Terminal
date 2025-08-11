@@ -186,3 +186,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Issues**: [GitHub Issues](https://github.com/jayaprakash-shanmugam/Ask-Terminal/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/jayaprakash-shanmugam/Ask-Terminal/discussions)
+
+
+
+# Newly Added Features
+- **Multi-Pipeline Command Execution** - Multi Stage Commands are Executed in a normal instead of complex llm usage, Contributed by @NithishNithi
