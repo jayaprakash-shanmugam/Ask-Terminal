@@ -6,9 +6,13 @@ import (
 	"log"
 	"os"
 	"strings"
+
+	// const envFileName = ".env"
+	_ "embed"
 )
 
-// const envFileName = ".env"
+//go:embed prompt.txt
+var SystemPrompt string
 
 // EnsureAPIKey checks for the API key and prompts user to create one if not exists
 func EnsureAPIKey() string {

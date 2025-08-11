@@ -24,8 +24,10 @@ type TerminalService struct {
 }
 
 func NewTerminalService(terminal *model.Terminal, gemini *GeminiService) *TerminalService {
+	t := terminal
+	t.SetToAskMode()
 	return &TerminalService{
-		terminal: terminal,
+		terminal: t,
 		gemini:   gemini,
 		askMode:  true, // Default to ask mode
 	}
@@ -39,9 +41,11 @@ func (t *TerminalService) Run() error {
 	for t.terminal.IsRunning() {
 		// Show different prompts based on mode
 		if t.askMode {
-			fmt.Printf("🤖 %s ", t.terminal.Prompt())
+			fmt.Printf("\n %s ", t.terminal.Prompt())
+			t.terminal.SetToAskMode()
 		} else {
-			fmt.Printf("💻 %s ", t.terminal.Prompt())
+			fmt.Printf("\n %s ", t.terminal.Prompt())
+			t.terminal.SetToShellMode()
 		}
 
 		input, err := reader.ReadString('\n')
@@ -64,7 +68,11 @@ func (t *TerminalService) Run() error {
 		// Handle immediate exit command without calling API
 		if input == "exit" || input == "quit" {
 			t.terminal.SetRunning(false)
-			fmt.Println("Goodbye!")
+			terminationMsg := "Session terminated."
+			if t.askMode {
+				terminationMsg = "Alright, see you next time!"
+			}
+			fmt.Println(terminationMsg)
 			continue
 		}
 
@@ -104,10 +112,12 @@ func (t *TerminalService) handleSpecialCommands(input string) bool {
 	switch strings.ToLower(input) {
 	case "askmode on", "ask on", "ai on":
 		t.askMode = true
+		t.terminal.SetToAskMode()
 		fmt.Println("🤖 Ask Mode: ON - You can now use natural language commands")
 		return true
 	case "askmode off", "ask off", "ai off":
 		t.askMode = false
+		t.terminal.SetToShellMode()
 		fmt.Println("💻 Terminal Mode: ON - Using traditional terminal commands")
 		return true
 	case "mode":
@@ -576,7 +586,11 @@ func (t *TerminalService) ExecuteCommand(cmdResponse dto.CommandResponse) error 
 		return nil
 	case "exit", "quit":
 		t.terminal.SetRunning(false)
-		fmt.Println("Goodbye!")
+		terminationMsg := "Session terminated."
+		if t.askMode {
+			terminationMsg = "Alright, see you next time!"
+		}
+		fmt.Println(terminationMsg)
 		return nil
 	}
 
@@ -614,6 +628,10 @@ func (t *TerminalService) ChangeDirectory(args []string) error {
 	// Check if directory exists
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return fmt.Errorf("directory does not exist: %s", dir)
+	}
+
+	if err := os.Chdir(dir); err != nil {
+		return fmt.Errorf("failed to change directory: %v", err)
 	}
 
 	t.terminal.SetWorkingDir(dir)
