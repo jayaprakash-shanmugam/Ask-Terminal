@@ -27,7 +27,7 @@ func main() {
 	// Handle graceful shutdown
 	go func() {
 		<-c
-		fmt.Println("\n🛑 Shutting down gracefully...")
+		fmt.Println("\nShutting down gracefully...")
 		terminalModel.SetRunning(false)
 		os.Exit(0)
 	}()

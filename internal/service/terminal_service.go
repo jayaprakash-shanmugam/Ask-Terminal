@@ -20,7 +20,7 @@ import (
 type TerminalService struct {
 	terminal *model.Terminal
 	gemini   *GeminiService
-	askMode  bool // New field to track ask mode
+	askMode  bool
 }
 
 func NewTerminalService(terminal *model.Terminal, gemini *GeminiService) *TerminalService {
@@ -29,7 +29,7 @@ func NewTerminalService(terminal *model.Terminal, gemini *GeminiService) *Termin
 	return &TerminalService{
 		terminal: t,
 		gemini:   gemini,
-		askMode:  true, // Default to ask mode
+		askMode:  true,
 	}
 }
 
@@ -164,10 +164,13 @@ func (t *TerminalService) ProcessDirectCommand(input string) error {
 	return t.ExecuteCommand(cmdResponse)
 }
 
-// ProcessWithGemini sends the query to Gemini and lists/confirms the returned command
 func (t *TerminalService) ProcessWithGemini(query string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Increased timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Simple spinner - just show it's working
+	spinnerMgr := NewSpinnerManager()
+	spinnerMgr.Start()
 
 	dirInfo := t.CollectDirectoryContext()
 	systemPrompt := fmt.Sprintf(
@@ -184,6 +187,7 @@ func (t *TerminalService) ProcessWithGemini(query string) error {
 	if err != nil {
 		return fmt.Errorf("gemini error: %v", err)
 	}
+	spinnerMgr.Stop()
 
 	if cmdResponse.MultiExec {
 		fmt.Println("🔄 Multiple commands detected. Executing step-by-step:")
@@ -210,11 +214,18 @@ func (t *TerminalService) ProcessWithGemini(query string) error {
 				continue
 			}
 
+			// Show spinner for command execution
+			execSpinner := NewSpinnerManager()
+			execSpinner.UpdateMessage(fmt.Sprintf("Executing step %d/%d...", idx+1, len(cmdResponse.MultiCommands)))
+			execSpinner.Start()
+
 			// Confirm and execute the command
 			if err := t.ConfirmAndExecute(commandRes); err != nil {
+				execSpinner.Stop()
 				fmt.Printf("❌ Error executing command: %s\n", err)
 				return err
 			}
+			execSpinner.Stop()
 			fmt.Println("✅ Step completed successfully")
 		}
 		return nil
